@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: youtube-video-downloader
+    env: docker
+    dockerContext: ./youtube_downloader_web
+    dockerfilePath: ./youtube_downloader_web/Dockerfile
+    plan: free
