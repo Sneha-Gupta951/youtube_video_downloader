@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="A modern, high-performance web application for downloading YouTube videos and audio with 4K and 1080p support.">
+    <title>YouTube Downloader (4K/1080p Support)</title>
+    <!-- Modern Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Load custom stylesheet safely mapped via Flask -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="app-header">
+            <div class="logo">
+                <i class="fa-brands fa-youtube icon-youtube" aria-hidden="true"></i>
+                <h1>YouTube Downloader</h1>
+            </div>
+            <!-- Jinja condition indicating the backend availability of FFmpeg -->
+            {% if has_ffmpeg %}
+            <div class="status-badge success" role="status" aria-live="polite">
+                <i class="fa-solid fa-bolt" aria-hidden="true"></i> High Quality System Active (1080p/4K Ready)
+            </div>
+            {% else %}
+            <div class="status-badge warning" role="status" aria-live="polite">
+                <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> Standard Mode (720p Max) - FFmpeg Missing
+            </div>
+            {% endif %}
+        </header>
+
+        <!-- Main Card Interface -->
+        <main class="card">
+            <div class="input-group">
+                <label for="url">Paste Video Link</label>
+                <div class="input-icon-wrapper">
+                    <i class="fa-solid fa-link icon-link" aria-hidden="true"></i>
+                    <!-- Added aria-required and required attribute for validation completeness -->
+                    <input type="url" id="url" placeholder="https://www.youtube.com/watch?v=..." autocomplete="off" required aria-required="true">
+                </div>
+            </div>
+
+            <div class="options-container">
+                <div class="input-group">
+                    <label for="format">Format</label>
+                    <select id="format">
+                        <option value="Video">Video</option>
+                        <option value="Audio Only (MP3)">Audio Only (MP3)</option>
+                    </select>
+                </div>
+                <div class="input-group">
+                    <label for="quality">Quality</label>
+                    <select id="quality" aria-live="polite">
+                        <!-- Populated dynamically via JS based on format and ffmpeg availability -->
+                    </select>
+                </div>
+            </div>
+
+            <!-- Download Submit Button -->
+            <button id="downloadBtn" class="btn-primary" aria-label="Start Download">
+                <i class="fa-solid fa-download" aria-hidden="true"></i> Start Download
+            </button>
+
+            <!-- Progress & Stats Section -->
+            <div id="progressSection" class="progress-section hidden" aria-live="polite">
+                <div class="status-header">
+                    <span id="statusText" class="status-text">Initializing...</span>
+                    <span id="percentText" class="percent-text">0%</span>
+                </div>
+                
+                <div class="progress-bar-container" role="progressbar" aria-valuemin="0" aria-valuemax="100">
+                    <div id="progressBar" class="progress-bar"></div>
+                </div>
+                
+                <div class="stats-container">
+                    <div class="stat" aria-label="Download Speed">
+                        <i class="fa-solid fa-gauge-high" aria-hidden="true"></i>
+                        <span id="speedText">--</span>
+                    </div>
+                    <div class="stat" aria-label="File Size">
+                        <i class="fa-solid fa-weight-scale" aria-hidden="true"></i>
+                        <span id="sizeText">--</span>
+                    </div>
+                    <div class="stat" aria-label="Estimated Time Remaining">
+                        <i class="fa-solid fa-clock" aria-hidden="true"></i>
+                        <span id="etaText">--</span>
+                    </div>
+                </div>
+                
+                <!-- Action shown after successfully finishing download and processing -->
+                <div id="actionArea" class="action-area hidden">
+                    <a id="saveFileBtn" class="btn-success" href="#" download>
+                        <i class="fa-regular fa-file-video" aria-hidden="true"></i> Save File to PC
+                    </a>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Store backend ffmpeg detection state safely using Jinja tojson filter -->
+    <script>
+        window.APP_CONFIG = {
+            hasFFmpeg: {{ has_ffmpeg | tojson }}
+        };
+    </script>
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+downloads/
+ffmpeg/
+ffmpeg.exe
+ffprobe.exe
+ffmpeg.zip
+ffmpeg_temp/
+.git/
+.env
