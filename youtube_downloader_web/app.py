@@ -74,6 +74,8 @@ def get_ydl_base_opts():
         # Sleep between requests to avoid rate limiting
         'sleep_interval': 1,
         'max_sleep_interval': 3,
+        # Proxy support — set PROXY_URL env variable on Render to use it
+        'proxy': os.environ.get('PROXY_URL', None),
     }
 
     # If cookies.txt file exists (user-provided), use it
