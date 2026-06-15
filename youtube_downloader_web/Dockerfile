@@ -20,6 +20,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy the rest of the application code
 COPY . .
 
-# Ensure standard mode starts the app on port 8000 using Gunicorn 
+# Ensure standard mode starts the app on Render's assigned port using Gunicorn.
 # The yt-dlp library can be IO heavy, so we use threaded workers.
-CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "3", "--threads", "2", "--timeout", "300", "app:app"]
+CMD ["sh", "-c", "gunicorn --bind 0.0.0.0:${PORT:-10000} --workers 3 --threads 2 --timeout 300 app:app"]
