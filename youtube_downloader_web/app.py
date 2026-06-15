@@ -5,12 +5,10 @@ import shutil
 import sys
 import subprocess
 
-# --- Auto-Install Dependencies if missing ---
 try:
     import yt_dlp
     from flask import Flask, request, jsonify, send_file, render_template
 except ImportError:
-    print("Missing dependencies. Installing automatically...")
     subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"])
     try:
         import yt_dlp
@@ -29,7 +27,6 @@ os.makedirs(DOWNLOADS_DIR, exist_ok=True)
 progress_store = {}
 
 def determine_ffmpeg():
-    """Detects FFmpeg in system PATH or local directory/subdirectories."""
     ffmpeg_path = shutil.which("ffmpeg")
     if not ffmpeg_path:
         local_ffmpeg = os.path.join(BASE_DIR, "ffmpeg.exe")
@@ -47,46 +44,16 @@ def determine_ffmpeg():
                     break
     return ffmpeg_path
 
-def get_ydl_base_opts():
-    """
-    Returns base yt-dlp options that bypass YouTube bot detection.
-    Uses multiple strategies to avoid the 'Sign in to confirm' error.
-    """
-    opts = {
-        # Mimic a real browser request
-        'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'en-us,en;q=0.5',
-            'Sec-Fetch-Mode': 'navigate',
-        },
-        # Use TV client — much less bot detection than web client
-        'extractor_args': {
-            'youtube': {
-                'player_client': ['tv_embedded', 'web'],
-                'player_skip': ['webpage', 'configs'],
-            }
-        },
-        # Retry on failure
-        'retries': 5,
-        'fragment_retries': 5,
-        'skip_unavailable_fragments': True,
-        # Sleep between requests to avoid rate limiting
-        'sleep_interval': 1,
-        'max_sleep_interval': 3,
-        # Proxy support — set PROXY_URL env variable on Render to use it
-        'proxy': os.environ.get('PROXY_URL', None),
-    }
-
-    # If cookies.txt file exists (user-provided), use it
-    cookies_path = os.path.join(BASE_DIR, 'cookies.txt')
-    if os.path.exists(cookies_path):
-        opts['cookiefile'] = cookies_path
-
-    return opts
+def try_download(ydl_opts, url, download_dir):
+    """Try download and return list of files if successful."""
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        ydl.download([url])
+    files = os.listdir(download_dir)
+    if not files:
+        raise Exception("No output file found.")
+    return files
 
 def download_task(download_id, url, mode, quality):
-    """Background task to handle yt-dlp downloading and post-processing."""
     download_dir = os.path.join(DOWNLOADS_DIR, download_id)
     os.makedirs(download_dir, exist_ok=True)
 
@@ -118,112 +85,95 @@ def download_task(download_id, url, mode, quality):
         elif d['status'] == 'finished':
             progress_store[download_id].update({'status': 'processing'})
 
-    # Start with base anti-bot options
-    ydl_opts = get_ydl_base_opts()
-    ydl_opts.update({
+    base = {
         'outtmpl': os.path.join(download_dir, '%(title)s.%(ext)s'),
         'progress_hooks': [my_hook],
         'quiet': True,
         'no_warnings': True,
-    })
-
+        'retries': 3,
+        'fragment_retries': 3,
+    }
     if has_ffmpeg:
-        ydl_opts['ffmpeg_location'] = ffmpeg_path
+        base['ffmpeg_location'] = ffmpeg_path
 
-    # Configure format based on mode and quality
+    # Format selection
     if mode == "Audio Only (MP3)":
         if has_ffmpeg:
             bitrate = "192"
             if "128" in quality: bitrate = "128"
             elif "320" in quality: bitrate = "320"
-            ydl_opts.update({
+            format_opts = {
                 'format': 'bestaudio/best',
-                'postprocessors': [{
-                    'key': 'FFmpegExtractAudio',
-                    'preferredcodec': 'mp3',
-                    'preferredquality': bitrate
-                }],
-            })
+                'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': bitrate}],
+            }
         else:
-            ydl_opts['format'] = 'bestaudio[ext=m4a]/bestaudio'
+            format_opts = {'format': 'bestaudio[ext=m4a]/bestaudio'}
     else:
         if has_ffmpeg:
-            ydl_opts['merge_output_format'] = 'mp4'
+            base['merge_output_format'] = 'mp4'
             if "360p" in quality:
-                ydl_opts['format'] = 'bestvideo[height<=360][vcodec^=avc1]+bestaudio[acodec^=mp4a]/bestvideo[height<=360][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=360]+bestaudio/best[height<=360]'
+                fmt = 'bestvideo[height<=360]+bestaudio/best[height<=360]'
             elif "480p" in quality:
-                ydl_opts['format'] = 'bestvideo[height<=480][vcodec^=avc1]+bestaudio[acodec^=mp4a]/bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=480]+bestaudio/best[height<=480]'
+                fmt = 'bestvideo[height<=480]+bestaudio/best[height<=480]'
             elif "720p" in quality:
-                ydl_opts['format'] = 'bestvideo[height<=720][vcodec^=avc1]+bestaudio[acodec^=mp4a]/bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=720]+bestaudio/best[height<=720]'
+                fmt = 'bestvideo[height<=720]+bestaudio/best[height<=720]'
             elif "1080p" in quality:
-                ydl_opts['format'] = 'bestvideo[height<=1080][vcodec^=avc1]+bestaudio[acodec^=mp4a]/bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best'
+                fmt = 'bestvideo[height<=1080]+bestaudio/best[height<=1080]/best'
             elif "1440p" in quality:
-                ydl_opts['format'] = 'bestvideo[height<=1440][vcodec^=avc1]+bestaudio[acodec^=mp4a]/bestvideo[height<=1440][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=1440]+bestaudio/best[height<=1440]/best'
+                fmt = 'bestvideo[height<=1440]+bestaudio/best[height<=1440]/best'
             else:
-                ydl_opts['format'] = 'bestvideo[vcodec^=avc1]+bestaudio[acodec^=mp4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best'
+                fmt = 'bestvideo+bestaudio/best'
+            format_opts = {'format': fmt}
         else:
             if "360p" in quality:
-                ydl_opts['format'] = '18/best[height<=360][ext=mp4][acodec!=none]'
+                format_opts = {'format': '18/best[height<=360][ext=mp4]'}
             elif "480p" in quality:
-                ydl_opts['format'] = '135/best[height<=480][ext=mp4][acodec!=none]'
+                format_opts = {'format': 'best[height<=480][ext=mp4]'}
             else:
-                ydl_opts['format'] = '22/best[height<=720][ext=mp4][acodec!=none]'
+                format_opts = {'format': '22/best[height<=720][ext=mp4]'}
 
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
+    # Try multiple clients in order
+    clients_to_try = [
+        # 1. iOS client — works best on Render
+        {'extractor_args': {'youtube': {'player_client': ['ios']}}},
+        # 2. Android client
+        {'extractor_args': {'youtube': {'player_client': ['android']}}},
+        # 3. TV embedded client
+        {'extractor_args': {'youtube': {'player_client': ['tv_embedded']}}},
+        # 4. mweb client
+        {'extractor_args': {'youtube': {'player_client': ['mweb']}}},
+        # 5. Last resort — no client specified
+        {},
+    ]
 
-        files = os.listdir(download_dir)
-        if files:
+    cookies_path = os.path.join(BASE_DIR, 'cookies.txt')
+    
+    last_error = None
+    for client_opts in clients_to_try:
+        try:
+            ydl_opts = {**base, **format_opts, **client_opts}
+            if os.path.exists(cookies_path):
+                ydl_opts['cookiefile'] = cookies_path
+            
+            files = try_download(ydl_opts, url, download_dir)
             progress_store[download_id].update({
                 'status': 'done',
                 'filename': files[0]
             })
-        else:
-            raise Exception("File was not saved properly. No output found.")
+            return  # Success!
+        except Exception as e:
+            last_error = str(e)
+            # Clean partial files before next attempt
+            for f in os.listdir(download_dir):
+                if f.endswith('.part') or f.endswith('.ytdl'):
+                    os.remove(os.path.join(download_dir, f))
+            continue
 
-    except Exception as e:
-        error_msg = str(e)
-        # If still getting bot error, try fallback with android client
-        if 'Sign in to confirm' in error_msg or 'bot' in error_msg.lower():
-            try:
-                fallback_opts = get_ydl_base_opts()
-                fallback_opts.update({
-                    'outtmpl': os.path.join(download_dir, '%(title)s.%(ext)s'),
-                    'progress_hooks': [my_hook],
-                    'quiet': True,
-                    'no_warnings': True,
-                    'format': 'best[ext=mp4]/best',
-                    'extractor_args': {
-                        'youtube': {
-                            'player_client': ['android', 'web_creator'],
-                        }
-                    },
-                })
-                if has_ffmpeg:
-                    fallback_opts['ffmpeg_location'] = ffmpeg_path
-
-                with yt_dlp.YoutubeDL(fallback_opts) as ydl:
-                    ydl.download([url])
-
-                files = os.listdir(download_dir)
-                if files:
-                    progress_store[download_id].update({
-                        'status': 'done',
-                        'filename': files[0]
-                    })
-                else:
-                    raise Exception("Fallback also failed. No output found.")
-            except Exception as e2:
-                progress_store[download_id].update({
-                    'status': 'error',
-                    'error': str(e2)
-                })
-        else:
-            progress_store[download_id].update({
-                'status': 'error',
-                'error': error_msg
-            })
+    # All clients failed
+    progress_store[download_id].update({
+        'status': 'error',
+        'error': last_error
+    })
 
 
 @app.route('/')
@@ -237,10 +187,8 @@ def start_download():
     url = data.get('url')
     mode = data.get('format', 'Video')
     quality = data.get('quality', 'Best Available (4K/8K)')
-
     if not url:
         return jsonify({'error': 'URL is required'}), 400
-
     download_id = str(uuid.uuid4())
     t = threading.Thread(target=download_task, args=(download_id, url, mode, quality))
     t.start()
@@ -256,15 +204,12 @@ def get_progress(download_id):
 def get_file(download_id):
     if download_id not in progress_store or progress_store[download_id]['status'] != 'done':
         return "File not ready", 400
-
     download_dir = os.path.join(DOWNLOADS_DIR, download_id)
     if not os.path.exists(download_dir):
         return "File directory not found", 404
-
     files = [f for f in os.listdir(download_dir) if not f.endswith('.ini') and not f.endswith('.part') and not f.startswith('.')]
     if not files:
         return "File not found", 404
-
     file_path = os.path.join(download_dir, files[0])
     return send_file(file_path, as_attachment=True)
 
